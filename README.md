@@ -1,4 +1,15 @@
-## Setup
+## Scene Text Recognition - Jersey Number Recognition
+
+Jersey number recognition is crucial for enhancing sports analytics, aiding in accurate player tracking and identification. Challenges such as player occlusion, multiple players, and blurry images complicate this task. 
+Our approach utilizes a two-step method: 
+* Using a detector to find jersey numbers
+* A recognizer to accurately identify these numbers
+
+The training and testing dataset is from [SoccerNet](https://www.soccer-net.org/tasks/jersey-number-recognition), which consists of 1427 and 1211 short videos of soccer players annotated with their corresponding numbers. All Jersey numbers range from 0-99 and players with non visible numbers are classified as -1. 
+
+[Poster](poster.pdf)
+
+
 Install the required dependencies (needed very specific versions to work together)
 ```bash
 pip install -r requirements.txt
