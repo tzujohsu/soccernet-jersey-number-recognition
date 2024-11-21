@@ -7,7 +7,7 @@ Our approach utilizes a two-step method:
 
 The training and testing dataset is from [SoccerNet](https://www.soccer-net.org/tasks/jersey-number-recognition), which consists of 1427 and 1211 short videos of soccer players annotated with their corresponding numbers. All Jersey numbers range from 0-99 and players with non visible numbers are classified as -1. 
 
-[Poster](poster.pdf)
+For more details of our apporach, see the [poster](poster.pdf)
 
 
 Install the required dependencies (needed very specific versions to work together)
