@@ -8,5 +8,3 @@ salloc --account=eecs545w24_class --partition=gpu --gpus=1 --mem-per-gpu=8000 --
 
 run using python run.py or scripts/run_inference.sh
 
-mean: [127.4395, 135.9471,  84.0932]
-std: [38.5333, 38.7357, 47.5903]

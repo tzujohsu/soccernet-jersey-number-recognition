@@ -1,3 +1,9 @@
+"""
+run the 
+
+"""
+
+# necessary packages import
 import argparse
 import logging
 import random
@@ -5,35 +11,73 @@ import torch
 import matplotlib.pyplot as plt
 import torch.nn as nn
 import torch.optim as optim
-from mmocr.apis import MMOCRInferencer
+from mmocr.apis import MMOCRInferencer, TextDetInferencer, TextRecInferencer
 from torch.utils.data import DataLoader
 import cv2
 import scipy
 import numpy as np
-import os
+import os, shutil
 import json
-from sklearn.cluster import KMeans
+from tqdm import tqdm
+from collections import defaultdict
+from soccernet_dataset import soccernet_dataset, soccernet_dataset_flat, generate_all_file_names
 
-from soccernet_dataset import soccernet_dataset, soccernet_dataset_flat
+#%% heuristic rules
+def longest_continuous_numbers(numbers):
+    seq_lengths = defaultdict(int)    
+    current_streak = 1
+    prev_num = None
+    for num in numbers:
+        if prev_num is None or num == prev_num:
+            current_streak += 1
+        else:
+            seq_lengths[prev_num] = max(seq_lengths[prev_num], current_streak)
+            current_streak = 1
+        prev_num = num
+    seq_lengths[prev_num] = max(seq_lengths[prev_num], current_streak)
+    
+    # Find the top 3 longest continuous sequences
+    top_3 = sorted(seq_lengths.items(), key=lambda x: x[1], reverse=True)[:3]
+    return top_3
+
+def get_weighted_most_frequent_number(numbers):
+    
+    weights = {}
+    # Assign weights based on the given rules
+    for num in list(set(numbers)):
+        if 10 <= num < 100:
+            weights[num] = weights.get(num, 0) + 1.05
+        else:
+            weights[num] = weights.get(num, 0) + 1
+    
+    # Find the longest continuous sequence of the same number
+    top3 = longest_continuous_numbers(numbers)
+    for num, length in top3:
+        weights[num] *= (1+ 0.01 * length)
+    
+    # Find the number with the highest weight
+    most_frequent_num = max(weights, key=weights.get)
+    return most_frequent_num
+
+
+#%%
 
 parser = argparse.ArgumentParser(description='EECS 545 SoccerNet Jersey Number Recognition')
 parser.add_argument('--seed', default=123)
-parser.add_argument('--det_threshold', default=0.6, type=float)
-parser.add_argument('--rec_threshold', default=0.9, type=float)
+parser.add_argument('--det_threshold', default=0.95, type=float)
+parser.add_argument('--rec_threshold', default=0.8, type=float)
+parser.add_argument('--restart_inference', action='store_true')
 parser.add_argument('--data_path', default='./data', type=str, help='path to dataset, the dir with (train, test, challenge) directories')
 parser.add_argument('--output_dir', default='./outputs', type=str, help='directory to store outputs')
-parser.add_argument('--det_config_path', default='mmocr/configs/textdet/dbnetpp/dbnetpp_resnet50-dcnv2_fpnc_soccernetannotated_gen.py', type=str, help='python file which defines architecture and training configurations')
-parser.add_argument('--det_weights_path', default='mmocr/soccernet-dbnetpp-genL/epoch_30.pth', type=str, help='weights for the finetuned detector')
-parser.add_argument('--rec_config_path', default='mmocr/configs/textrecog/svtr/svtr-base_20e_soccernet_gen.py', type=str, help='python file which defines architecture and training configurations')
-parser.add_argument('--rec_weights_path', default='mmocr/soccernet-svtr/epoch_20.pth', type=str, help='weights for the finetuned recognizer')
-parser.add_argument('--save_vis', action='store_true')
+parser.add_argument('--det_config_path', default='mmocr/configs/textdet/fcenet/fcenet_resnet50_fpn_1500e_soccernetannotated.py', type=str, help='python file which defines architecture and training configurations')
+parser.add_argument('--det_weights_path', default='mmocr/jocelyn-output/fce_epoch_10.pth', type=str, help='weights for the finetuned detector')
+parser.add_argument('--rec_config_path', default='mmocr/soccernet-svtr-genL-combined/svtr-small_20e_soccernet_gen.py', type=str, help='python file which defines architecture and training configurations')
+parser.add_argument('--rec_weights_path', default='mmocr/soccernet-svtr-genL-combined/epoch_10.pth', type=str, help='weights for the finetuned recognitor')
+
 args = parser.parse_args()
 
-# create the output and vis directories
-os.makedirs(f"{args.output_dir}/soccernet-{os.getenv('SLURM_JOB_ID')}/vis", exist_ok=True)
-
 # toggle between INFO, DEBUG
-logfile = f"{args.output_dir}/soccernet-{os.getenv('SLURM_JOB_ID')}/output.log"
+logfile = f"logs/soccernet-{os.getenv('SLURM_JOB_ID')}-info.log"
 logging.basicConfig(filename=logfile,
     format='%(asctime)s %(message)s', 
     level=logging.DEBUG)
@@ -41,193 +85,120 @@ logger = logging.getLogger(__name__)
 logger.info(args)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-logger.info(f"Using {device}")
 
 random.seed(args.seed)
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 
-train_dataset = soccernet_dataset(args.data_path, "train")
+
 test_dataset = soccernet_dataset(args.data_path, "test")
-logger.info(f"Num videos in train dataset: {len(train_dataset)}")
 logger.info(f"Num videos in test dataset: {len(test_dataset)}")
 
-# det = MMOCRInferencer(det=args.det_config_path,
-#     det_weights=args.det_weights_path,
-#     device=device)
-# rec = MMOCRInferencer(rec=args.rec_config_path,
-#     rec_weights=args.rec_weights_path,
-#     device=device)
+#%%
 
-<<<<<<< HEAD
-infer = MMOCRInferencer(det=args.det_config_path,
-    det_weights=args.det_weights_path,
-    rec="svtr-small",
-    device=device)
-=======
-# infer = MMOCRInferencer(det=args.det_config_path,
-#     det_weights=args.det_weights_path,
-#     rec="svtr-small",
-#     device=device)
->>>>>>> b11a05adc516705c385bfdfd9080020049f79c4a
+det_infer = TextDetInferencer(model=args.det_config_path, weights=args.det_weights_path, device=device)
+
+# one single recognizer
+# rec_infer = TextRecInferencer(model=args.rec_config_path, weights=args.rec_weights_path, device=device)
+# rec_infer = TextRecInferencer(model='svtr-small',device=device)
+
+# emsemble learning
+recognizer_names = ['svtr-small', 'NRTR', 'SATRN_sm', 'SAR', 'ABINet']
+recognizers = [TextRecInferencer(model=name) for name in recognizer_names]
 
 correct = []
-for video_idx, (frame_paths, gt) in enumerate(test_dataset):
-    # output of inferencer is in this format: https://mmocr.readthedocs.io/en/dev-1.x/user_guides/inference.html#output
+weighted_correct = []
 
-    # for debugging to skip most frames
-    # frame_paths = frame_paths[:4]
+checkpoint_path = os.path.join(args.output_dir, "preds.json")
+if not args.restart_inference and os.path.exists(checkpoint_path):
+    with open(checkpoint_path, 'r') as f:
+        output_json = json.load(f)
+else:
+    output_json = {}
+already_ran = len(output_json.keys())
+idx_to_use = range(already_ran, len(test_dataset))
+subset = torch.utils.data.Subset(test_dataset, idx_to_use)
 
-    # FIX THIS - predicts non soccerball as soccerball sometimes
-    HALF_CROP_SIZE = 10      # take crop from center of each image
-    max_shape = 0
-    all_pixels = []
-<<<<<<< HEAD
-    last_image = None
+for video_idx, (frame_paths, gt) in enumerate(subset, start=already_ran):
+    predictions = []
+    result = det_infer(frame_paths, out_dir=args.output_dir, save_vis=False, return_vis=False)
+    idx_to_rec = []
+    cropped_imgs = []
+
+    shapes = []
     for path in frame_paths:
         img = cv2.imread(path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        last_image = img
-        max_shape = max(max_shape, img.shape[0])
-        max_shape = max(max_shape, img.shape[1])
+        shapes.append(img.shape[0])
+        shapes.append(img.shape[1])
 
-    if max_shape < 50:
-        final_prediction = -1
-        logger.info(f"Video: {video_idx}, soccer ball shortcut prediction")
+    print("Video", video_idx, "average shape:", sum(shapes)/len(shapes))
+    if sum(shapes) / len(shapes) < 50: # if the frame is very small, it's likely to be the soccer ball, so we output 1
+        final_prediction = 1
+        final_prediction_wt = 1
+        logger.info(f"Video: {video_idx}, soccer ball shortcut prediction as 1")
     else:
-        # det_result = det(frame_paths, out_dir=args.output_dir, save_vis=False, return_vis=True)
-        # rec_result = rec(frame_paths, out_dir=args.output_dir, save_vis=False, return_vis=True)
-        # print(det_result['predictions'][0])
-        # assert False
-
-        result = infer(frame_paths, out_dir=args.output_dir, save_vis=False, return_vis=True)
-
-        predictions = []
+        det_scores_kept = []
         for idx, pred in enumerate(result['predictions']):
-            det_scores = pred['det_scores']
-            rec_scores = pred['rec_scores']
-            rec_texts = pred['rec_texts']
-            # print(idx, det_scores, rec_texts)
-            predictions.extend(list(zip(det_scores, rec_scores, rec_texts)))
+            if len(pred['scores']) > 0:
+                
+                if pred['scores'][0] > args.det_threshold:
+                    bounding_box = pred['polygons']
+                    
+                    img = cv2.imread(frame_paths[idx])
+                    bounding_box = [int(i) for i in bounding_box[0]]
+                    cropped_image = img[bounding_box[3]:bounding_box[1], bounding_box[0]:bounding_box[4]]
+                    if cropped_image.shape[0] > 10 and cropped_image.shape[1] > 10:
+                        cropped_imgs.append(cropped_image)
+                        det_scores_kept.append(pred['scores'][0])
 
-            # save the images which were over the detection threshold
-            if args.save_vis:
-                over_threshold = len(det_scores) != 0 and any(i >= args.det_threshold for i in det_scores)
-                if over_threshold:
-                    filename = frame_paths[idx].split('/')[-1]
-                    plt.figure()
-                    plt.title(det_scores)
-                    plt.imshow(result['visualization'][0])
-                    plt.savefig(f"{args.output_dir}/soccernet-{os.getenv('SLURM_JOB_ID')}/vis/{filename}")
-                    logger.debug(f"Saving figure {filename}")
+        for i, rec_infer in enumerate(recognizers):
+            print(recognizer_names[i])
+            rec_result = rec_infer(cropped_imgs, out_dir=args.output_dir, save_vis=False, return_vis=False)
+            rec_result = rec_result['predictions']
 
-        confident_numbers = []
-        # filter non numeric predictions, take only predictions with det confidence above threshold
-        for i, (det_score, rec_score, rec_text) in enumerate(predictions):
-            if det_score > args.det_threshold and rec_score > args.rec_threshold and rec_text.isnumeric():
-                confident_numbers.append(int(rec_text))
-
-        confident_numbers = np.array(confident_numbers)
-        final_prediction = scipy.stats.mode(confident_numbers, axis=None, keepdims=False)[0]
+            for i, pred_rec in enumerate(rec_result):
+                text = pred_rec['text']
+                rec_score = pred_rec['scores']
+                # print("det score", det_scores_kept[i], "rec score", rec_score, text)
+                if rec_score > args.rec_threshold and text.isnumeric():
+                    if len(str(text)) > 2:
+                        predictions.append(int(str(text)[-2:]))
+                    else:
+                        predictions.append(int(text))
+                
+        predictions = np.array(predictions)
+        
+        final_prediction = scipy.stats.mode(predictions, axis=None, keepdims=False)[0]
         if np.isnan(final_prediction):
             final_prediction = -1
 
+        if len(predictions) < 5 * len(recognizers):
+            final_prediction_wt = -1
+        else:
+            final_prediction_wt = get_weighted_most_frequent_number(predictions)
+
     correct.append(final_prediction == gt)
+    weighted_correct.append(final_prediction_wt == gt)
 
-    logger.info(f"Video: {video_idx}, Prediction: {final_prediction}, Ground truth: {gt} Correct?: {final_prediction == gt}")
-    for pred in predictions:
-        logger.debug(pred)
+    # use the weighted prediction for submission
+    output_json[str(video_idx)] = int(final_prediction_wt)
 
-logger.info(f"Final Accuracy: {sum(correct)}/{len(correct)} = {sum(correct) / len(correct)}")
-=======
-    for path in frame_paths:
-        img = cv2.imread(path)
-        max_shape = max(max_shape, img.shape[0])
-        max_shape = max(max_shape, img.shape[1])
-
-        # taking center crop
-        c_h, c_w = img.shape[0] // 2, img.shape[1] // 2
-        crop = img[c_h-HALF_CROP_SIZE : c_h+HALF_CROP_SIZE, c_w-HALF_CROP_SIZE:c_w+HALF_CROP_SIZE]
-
-        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB) 
-        pixels = crop_rgb.reshape(-1, 3)
-        all_pixels.append(pixels)
-
-        # https://stackoverflow.com/questions/12182891/plot-image-color-histogram-using-matplotlib
-        # color = ('b', 'g', 'r')
-        # for i,col in enumerate(color_record.keys()):
-        #     histr = cv2.calcHist([img],[i],None,[256],[0,256])
-        #     color_record[col] += histr
+    print(f"Video: {video_idx}, Pred: {final_prediction, final_prediction_wt}, GT: {gt} Correct?: {final_prediction == gt, final_prediction_wt == gt}, {predictions}")
+    logger.info(f"Video: {video_idx}, Pred: {final_prediction, final_prediction_wt}, GT: {gt} Correct?: {final_prediction == gt, final_prediction_wt == gt}, {predictions}")
     
-    # print([x.shape for x in all_pixels])
-    all_pixels = np.concatenate(all_pixels, axis=0)
-    all_colors = np.array(['#%02x%02x%02x' % tuple(rgb) for rgb in all_pixels])
-    # choose = np.random.choice(all_pixels.shape[0], 100000, replace=False)
-    # all_pixels = all_pixels[choose, :]
-    # all_colors = all_colors[choose]
-    print(all_pixels.shape, all_colors.shape)
+    # shutil.rmtree(cropped_path)
 
-    kmeans = KMeans(n_clusters=3, random_state=0, n_init="auto").fit(all_pixels)
-    cluster_centers = kmeans.cluster_centers_.astype(int)
-    cluster_colors = np.array(['#%02x%02x%02x' % tuple(rgb) for rgb in cluster_centers])
-    print("centers", cluster_centers)
+    # log the results every 50 videos
+    if video_idx % 50 == 0:
+        print(f"Video{video_idx} ACC: {sum(correct)}/{len(correct)}, {sum(weighted_correct)}/{len(weighted_correct)}")
+        logger.info(f"Video{video_idx} ACC: {sum(correct)}/{len(correct)}, {sum(weighted_correct)}/{len(weighted_correct)}")
 
-    fig = plt.figure()
-    ax1 = fig.add_subplot(121, projection='3d')
-    ax2 = fig.add_subplot(122, projection='3d')
-    ax1.scatter(all_pixels[:, 0], all_pixels[:, 1], all_pixels[:, 2], c=all_colors)
-    ax2.scatter(cluster_centers[:, 0], cluster_centers[:, 1], cluster_centers[:, 2], c=cluster_colors)
-    print("saving color histogram", f"colors/center_crop_{path.split('/')[-1]}")
-    os.makedirs("colors", exist_ok=True)
-    plt.savefig(f"colors/center_crop_{path.split('/')[-1]}")
-    plt.close()
+        with open(checkpoint_path, 'w') as f:
+            json.dump(output_json, f)
     
-#     if max_shape < 50:
-#         final_prediction = -1
-#         logger.info(f"Video: {video_idx}, soccer ball shortcut prediction")
-#     else:
-#         # det_result = det(frame_paths, out_dir=args.output_dir, save_vis=False, return_vis=True)
-#         # rec_result = rec(frame_paths, out_dir=args.output_dir, save_vis=False, return_vis=True)
-#         # print(det_result['predictions'][0])
-#         # assert False
 
-#         result = infer(frame_paths, out_dir=args.output_dir, save_vis=False, return_vis=True)
+logger.info(f"Final Accuracy: {sum(correct)}/{len(correct)}")
+logger.info(f"Final Accuracy weighted: {sum(weighted_correct)}/{len(weighted_correct)}")
 
-#         predictions = []
-#         for idx, pred in enumerate(result['predictions']):
-#             det_scores = pred['det_scores']
-#             rec_scores = pred['rec_scores']
-#             rec_texts = pred['rec_texts']
-#             # print(idx, det_scores, rec_texts)
-#             predictions.extend(list(zip(det_scores, rec_scores, rec_texts)))
-
-#             # save the images which were over the detection threshold
-#             if args.save_vis:
-#                 over_threshold = len(det_scores) != 0 and any(i >= args.det_threshold for i in det_scores)
-#                 if over_threshold:
-#                     filename = frame_paths[idx].split('/')[-1]
-#                     plt.figure()
-#                     plt.title(det_scores)
-#                     plt.imshow(result['visualization'][0])
-#                     plt.savefig(f"{args.output_dir}/soccernet-{os.getenv('SLURM_JOB_ID')}/vis/{filename}")
-#                     logger.debug(f"Saving figure {filename}")
-
-#         confident_numbers = []
-#         # filter non numeric predictions, take only predictions with det confidence above threshold
-#         for i, (det_score, rec_score, rec_text) in enumerate(predictions):
-#             if det_score > args.det_threshold and rec_score > args.rec_threshold and rec_text.isnumeric():
-#                 confident_numbers.append(int(rec_text))
-
-#         confident_numbers = np.array(confident_numbers)
-#         final_prediction = scipy.stats.mode(confident_numbers, axis=None, keepdims=False)[0]
-#         if np.isnan(final_prediction):
-#             final_prediction = -1
-
-#     correct.append(final_prediction == gt)
-
-#     logger.info(f"Video: {video_idx}, Prediction: {final_prediction}, Ground truth: {gt} Correct?: {final_prediction == gt}")
-#     for pred in predictions:
-#         logger.debug(pred)
-
-# logger.info(f"Final Accuracy: {sum(correct)}/{len(correct)} = {sum(correct) / len(correct)}")
->>>>>>> b11a05adc516705c385bfdfd9080020049f79c4a
+print("Final Accuracy: ", sum(correct)/len(correct))
+print("Final Accuracy weighted: ", sum(weighted_correct)/len(weighted_correct))

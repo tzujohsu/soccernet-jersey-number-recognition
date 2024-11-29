@@ -21,28 +21,6 @@ Install the required dependencies (needed very specific versions to work togethe
 pip install -r requirements.txt
 ```
 
-Directory Structure:
-```bash
-tree -L 1
-.
-├── data
-├── demo
-├── demo_config
-├── generate_annotation_file.py
-├── logs
-├── mmocr
-├── mmocr_tutorial.ipynb
-├── notes.txt
-├── outputs
-├── __pycache__
-├── requirements.txt
-├── results
-├── run.py
-├── scripts
-├── soccernet-annotated
-├── soccernet_dataset.py
-└── src
-```
 On my computer, the official SoccerNet data is in `data/` and our annotated data is in `soccernet-annotated/`.
 
 First, we need to link the annotated dataset to the correct directory in `mmocr/data`. Since my data is already in the `soccernet-annotated` directory I just create a symbolic link in the correct place without duplicating the data.
@@ -98,8 +76,9 @@ The model config can be found at `mmocr/configs/textdet/dbnetpp/dbnetpp_resnet50
 
 I used the same DBNet++ base model pretrained on ICDAR 2015, the only modifications were to the Resize size, the number of epochs (10), and the normalization for the images (custom mean, std). 
 
+It's similar to finetune a recognizer, you need to setup the model config at: `mmocr/configs/textrecog`.
 
-To perform your own finetuning, you just need to define a new config file and inherit the correct model architecture, optimizer, scheduler, transforms, etc. The hyperparameters, model architecture, learning rate, epochs, etc. can all be modified by changing the appropriate config file.
+In short, to perform your own finetuning, you just need to define a new config file and inherit the correct model architecture, optimizer, scheduler, transforms, etc. The hyperparameters, model architecture, learning rate, epochs, etc. can all be modified by changing the appropriate config file.
 I recommend reading this [page](https://mmengine.readthedocs.io/en/latest/advanced_tutorials/config.html) to learn more about the inheritance for the config files. 
 
 To run the finetuning:
